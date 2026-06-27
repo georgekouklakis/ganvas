@@ -1,0 +1,1394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Canvas Board</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #000;
+  font-family: -apple-system, "SF Pro Display", system-ui, sans-serif;
+  user-select: none;
+}
+
+#viewport {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+}
+
+#world {
+  position: absolute;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+
+/* Subtle dot grid */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.obj { position: absolute; }
+
+.obj.image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Apple system red #FF3B30, refined 2px border */
+.obj.rect {
+  border: 2px solid #FF3B30;
+  background: rgba(255,59,48,0.07);
+  border-radius: 4px;
+}
+
+#draw-preview {
+  position: absolute;
+  border: 2px dashed rgba(255,59,48,0.65);
+  background: rgba(255,59,48,0.05);
+  border-radius: 4px;
+  pointer-events: none;
+  display: none;
+  z-index: 9999;
+}
+
+/* ── Handle overlay — lives in fixed/screen space ── */
+
+#handle-overlay {
+  position: fixed;
+  display: none;
+  z-index: 990;
+  pointer-events: none;
+  overflow: visible;
+}
+
+/* Circular handles — white disc with Apple-blue ring, no border */
+.rh {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  background: #ffffff;
+  border-radius: 50%;
+  pointer-events: all;
+  box-shadow:
+    0 0 0 1.5px rgba(10,132,255,0.9),
+    0 2px 8px rgba(0,0,0,0.55);
+  transition: transform 0.1s ease;
+}
+.rh:hover { transform: scale(1.35); }
+
+/* Positions: handle centre sits on the edge */
+.rh[data-dir="nw"] { left:-5px;               top:-5px;               cursor:nwse-resize; }
+.rh[data-dir="n"]  { left:calc(50% - 4.5px);  top:-5px;               cursor:ns-resize;   }
+.rh[data-dir="ne"] { right:-5px;               top:-5px;               cursor:nesw-resize; }
+.rh[data-dir="w"]  { left:-5px;                top:calc(50% - 4.5px); cursor:ew-resize;   }
+.rh[data-dir="e"]  { right:-5px;               top:calc(50% - 4.5px); cursor:ew-resize;   }
+.rh[data-dir="sw"] { left:-5px;                bottom:-5px;            cursor:nesw-resize; }
+.rh[data-dir="s"]  { left:calc(50% - 4.5px);  bottom:-5px;            cursor:ns-resize;   }
+.rh[data-dir="se"] { right:-5px;               bottom:-5px;            cursor:nwse-resize; }
+
+/* ── Toolbar — frosted glass ── */
+
+#toolbar {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30,30,32,0.6);
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border: 1px solid rgba(255,255,255,0.11);
+  border-radius: 22px;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  z-index: 1000;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 12px 40px rgba(0,0,0,0.55),
+    0 2px 8px  rgba(0,0,0,0.3);
+}
+
+.sep {
+  width: 1px;
+  height: 16px;
+  background: rgba(255,255,255,0.1);
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+.tool-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.45);
+  padding: 6px 14px;
+  border-radius: 16px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.2s, color 0.2s;
+  white-space: nowrap;
+  -webkit-font-smoothing: antialiased;
+}
+.tool-btn:hover        { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.8); }
+.tool-btn.active       {
+  background: rgba(255,255,255,0.14);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), 0 1px 4px rgba(0,0,0,0.35);
+}
+.tool-btn.danger:hover { background: rgba(255,59,48,0.15); color: #FF3B30; }
+.tool-btn svg          { flex-shrink: 0; }
+.tool-btn u {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: rgba(255,255,255,0.3);
+  text-decoration-thickness: 1px;
+}
+.tool-btn.active u { text-decoration-color: rgba(255,255,255,0.6); }
+.tool-btn:hover u  { text-decoration-color: rgba(255,255,255,0.5); }
+
+body.tool-select    #viewport { cursor: default;   }
+body.tool-highlight #viewport { cursor: crosshair; }
+body.tool-text      #viewport { cursor: text;      }
+body.panning        #viewport { cursor: grabbing;  }
+body.tool-select .obj.selected { cursor: move; }
+/* Per-object selection box — zoom-compensated so it stays 1.5 px on screen */
+.obj.selected {
+  box-shadow: 0 0 0 calc(1.5px / var(--zoom, 1)) rgba(10,132,255,0.85);
+}
+
+.obj.text {
+  font-family: -apple-system, "SF Pro Display", system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: pre;
+  -webkit-font-smoothing: antialiased;
+}
+
+#text-input {
+  position: absolute;
+  font-family: -apple-system, "SF Pro Display", system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: pre;
+  min-width: 2px;
+  min-height: 1.3em;
+  border: none;
+  outline: none;
+  background: transparent;
+  display: none;
+  color: #fff;
+  caret-color: #0A84FF;
+  -webkit-font-smoothing: antialiased;
+  user-select: text;
+  -webkit-user-select: text;
+  z-index: 100;
+}
+
+#hint {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.18);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  z-index: 500;
+  text-align: center;
+  line-height: 1.8;
+  transition: opacity 0.4s;
+}
+#hint.hidden { opacity: 0; }
+
+/* ── File menu ── */
+
+#file-menu {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 1000;
+  user-select: none;
+}
+
+#file-menu-btn {
+  background: rgba(30,30,32,0.6);
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border: 1px solid rgba(255,255,255,0.11);
+  border-radius: 14px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: rgba(255,255,255,0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 12px 40px rgba(0,0,0,0.55),
+    0 2px 8px rgba(0,0,0,0.3);
+  transition: background 0.2s, color 0.2s;
+}
+#file-menu-btn:hover { background: rgba(50,50,52,0.75); color: #fff; }
+
+#file-menu-panel {
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  background: rgba(30,30,32,0.6);
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border: 1px solid rgba(255,255,255,0.11);
+  border-radius: 14px;
+  padding: 4px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 12px 40px rgba(0,0,0,0.55),
+    0 2px 8px rgba(0,0,0,0.3);
+}
+#file-menu-panel.open { display: flex; }
+
+.file-menu-item {
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.55);
+  padding: 7px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: -apple-system, "SF Pro Display", system-ui, sans-serif;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  -webkit-font-smoothing: antialiased;
+  transition: background 0.15s, color 0.15s;
+  width: 100%;
+  text-align: left;
+}
+.file-menu-item:hover        { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.9); }
+.file-menu-item.danger:hover { background: rgba(255,59,48,0.15);   color: #FF3B30; }
+</style>
+</head>
+<body class="tool-select">
+
+<div id="toolbar">
+  <button class="tool-btn active" id="btn-select" title="Select (S)">
+    <svg width="13" height="13" viewBox="0 0 13 14" fill="currentColor">
+      <path d="M1 1v11.5l3-3 2 5 1.5-.6-2-5H10z"/>
+    </svg>
+    <span><u>S</u>elect</span>
+  </button>
+  <button class="tool-btn" id="btn-text" title="Text (T)">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M2 3h12v2H9v8H7V5H2V3z"/>
+    </svg>
+    <span><u>T</u>ext</span>
+  </button>
+  <button class="tool-btn" id="btn-highlight" title="Highlight (H)">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+      <rect x="2" y="2" width="12" height="12" rx="1"/>
+    </svg>
+    <span><u>H</u>ighlight</span>
+  </button>
+</div>
+
+<div id="file-menu">
+  <button id="file-menu-btn" title="File">
+    <svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor">
+      <path d="M0 1.5A1.5 1.5 0 011.5 0H7l4 4v8.5A1.5 1.5 0 019.5 14h-8A1.5 1.5 0 010 12.5V1.5zM7 0v4h4"/>
+    </svg>
+  </button>
+  <div id="file-menu-panel">
+    <button class="file-menu-item" id="file-import-btn">
+      <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor">
+        <path d="M7 1v8M4 6l3 3 3-3M1 10v2.5A.5.5 0 001.5 13h11a.5.5 0 00.5-.5V10"/>
+      </svg>
+      Import
+    </button>
+    <button class="file-menu-item" id="file-export-btn">
+      <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor">
+        <path d="M7 9V1M4 4l3-3 3 3M1 10v2.5a.5.5 0 00.5.5h11a.5.5 0 00.5-.5V10"/>
+      </svg>
+      Export
+    </button>
+    <button class="file-menu-item danger" id="file-wipe-btn">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M2 3h12l-1 10a1 1 0 01-1 1H4a1 1 0 01-1-1zm4-2h4v1H6z"/>
+      </svg>
+      Wipe
+    </button>
+  </div>
+</div>
+<input type="file" id="file-import-input" accept=".json" style="display:none">
+
+<div id="viewport">
+  <div id="world">
+    <div id="draw-preview"></div>
+    <div id="text-input" contenteditable="plaintext-only" spellcheck="false"></div>
+  </div>
+</div>
+
+<!-- Resize handle overlay — in fixed/screen space so handles are always 9px -->
+<div id="handle-overlay">
+  <div class="rh" data-dir="nw"></div>
+  <div class="rh" data-dir="n"></div>
+  <div class="rh" data-dir="ne"></div>
+  <div class="rh" data-dir="w"></div>
+  <div class="rh" data-dir="e"></div>
+  <div class="rh" data-dir="sw"></div>
+  <div class="rh" data-dir="s"></div>
+  <div class="rh" data-dir="se"></div>
+</div>
+
+<div id="hint">
+  Paste an image to add it &nbsp;·&nbsp; Scroll to zoom &nbsp;·&nbsp; Drag background to pan<br>
+  Delete removes selected &nbsp;·&nbsp; Shift + drag corner/edge = lock aspect ratio
+</div>
+
+<script>
+const viewport      = document.getElementById('viewport');
+const world         = document.getElementById('world');
+const preview       = document.getElementById('draw-preview');
+const handleOverlay = document.getElementById('handle-overlay');
+const hint          = document.getElementById('hint');
+
+// ── Highlight color palette ───────────────────
+
+const RECT_COLORS = [
+  { border: '#FF3B30', fill: 'rgba(255,59,48,0.07)'   }, // red
+  { border: '#FFD60A', fill: 'rgba(255,214,10,0.07)'  }, // yellow
+  { border: '#64D2FF', fill: 'rgba(100,210,255,0.07)' }, // light blue
+  { border: '#30D158', fill: 'rgba(48,209,88,0.07)'   }, // green
+];
+
+function applyRectColor(el, colorIndex) {
+  const c = RECT_COLORS[colorIndex ?? 0];
+  el.style.borderColor     = c.border;
+  el.style.backgroundColor = c.fill;
+}
+
+// ── State ────────────────────────────────────
+
+let state = {
+  objects: [],
+  pan:    { x: 0, y: 0 },
+  zoom:   1,
+  tool:   'select',
+  nextId: 1,
+};
+
+let drag        = null;
+let selectedIds = new Set();
+let shiftHeld   = false;
+let undoStack   = [];
+
+// ── Image blob cache (mirrors IndexedDB images store) ────
+
+const imageBlobs = new Map(); // id -> Blob
+
+// ── IndexedDB persistence ─────────────────────
+
+let db = null;
+const DB_NAME = 'canvas-board-db';
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = e => {
+      const d = e.target.result;
+      if (!d.objectStoreNames.contains('state'))  d.createObjectStore('state');
+      if (!d.objectStoreNames.contains('images')) d.createObjectStore('images');
+    };
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+function idbPut(store, key, val) {
+  const tx = db.transaction(store, 'readwrite');
+  tx.objectStore(store).put(val, key);
+  return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = e => rej(e.target.error); });
+}
+
+function idbGet(store, key) {
+  return new Promise((resolve, reject) => {
+    const tx  = db.transaction(store, 'readonly');
+    const req = tx.objectStore(store).get(key);
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+function idbGetAllImages() {
+  return new Promise((resolve, reject) => {
+    const tx    = db.transaction('images', 'readonly');
+    const store = tx.objectStore('images');
+    const kr = store.getAllKeys(), vr = store.getAll();
+    tx.oncomplete = () => resolve({ keys: kr.result, vals: vr.result });
+    tx.onerror    = e => reject(e.target.error);
+  });
+}
+
+function idbClear(store) {
+  const tx = db.transaction(store, 'readwrite');
+  tx.objectStore(store).clear();
+  return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = e => rej(e.target.error); });
+}
+
+function dataURLtoBlob(dataURL) {
+  const [header, data] = dataURL.split(',');
+  const mime = header.match(/:(.*?);/)[1];
+  const bin  = atob(data);
+  const arr  = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+function blobToDataURL(blob) {
+  return new Promise(resolve => {
+    const r = new FileReader();
+    r.onload = e => resolve(e.target.result);
+    r.readAsDataURL(blob);
+  });
+}
+
+let saveTimer = null;
+function save() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(doSave, 300);
+}
+
+async function doSave() {
+  if (!db) return;
+  try {
+    const stateToStore = {
+      objects: state.objects.map(o => {
+        if (o.type !== 'image') return o;
+        const { src, ...rest } = o; return rest;
+      }),
+      pan: state.pan, zoom: state.zoom, nextId: state.nextId,
+    };
+    const tx = db.transaction(['state', 'images'], 'readwrite');
+    tx.objectStore('state').put(stateToStore, 'main');
+    const imgStore = tx.objectStore('images');
+    imgStore.clear();
+    for (const [id, blob] of imageBlobs) imgStore.put(blob, id);
+    await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = e => rej(e.target.error); });
+  } catch (_) {}
+}
+
+async function load() {
+  if (!db) return;
+  try {
+    // One-time migration from localStorage
+    const lsRaw = localStorage.getItem('canvas-board-v1');
+    if (lsRaw) {
+      const d = JSON.parse(lsRaw);
+      state.objects = d.objects || [];
+      state.pan     = d.pan    || { x: 0, y: 0 };
+      state.zoom    = d.zoom   || 1;
+      state.nextId  = d.nextId || 1;
+      for (const obj of state.objects) {
+        if (obj.type === 'image' && obj.src) imageBlobs.set(obj.id, dataURLtoBlob(obj.src));
+      }
+      localStorage.removeItem('canvas-board-v1');
+      await doSave();
+      return;
+    }
+    const stored = await idbGet('state', 'main');
+    if (!stored) return;
+    state.objects = stored.objects || [];
+    state.pan     = stored.pan    || { x: 0, y: 0 };
+    state.zoom    = stored.zoom   || 1;
+    state.nextId  = stored.nextId || 1;
+    const { keys, vals } = await idbGetAllImages();
+    const validIds = new Set(state.objects.filter(o => o.type === 'image').map(o => o.id));
+    for (let i = 0; i < keys.length; i++) {
+      const id = keys[i], blob = vals[i];
+      if (!validIds.has(id)) continue;
+      imageBlobs.set(id, blob);
+      const obj = state.objects.find(o => o.id === id);
+      if (obj) obj.src = await blobToDataURL(blob);
+    }
+  } catch (_) {}
+}
+
+// ── Undo ─────────────────────────────────────
+
+function pushUndo() {
+  undoStack.push(JSON.stringify(state.objects));
+  if (undoStack.length > 40) undoStack.shift();
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  state.objects = JSON.parse(undoStack.pop());
+  // Rebuild imageBlobs to match restored state
+  const validIds = new Set(state.objects.filter(o => o.type === 'image').map(o => o.id));
+  for (const [id] of imageBlobs) { if (!validIds.has(id)) imageBlobs.delete(id); }
+  for (const obj of state.objects) {
+    if (obj.type === 'image' && obj.src && !imageBlobs.has(obj.id))
+      imageBlobs.set(obj.id, dataURLtoBlob(obj.src));
+  }
+  selectedIds.clear();
+  updateHandleOverlay();
+  save();
+  renderAll();
+}
+
+// ── Render ───────────────────────────────────
+
+function applyTransform() {
+  world.style.transform = `translate(${state.pan.x}px,${state.pan.y}px) scale(${state.zoom})`;
+  document.documentElement.style.setProperty('--zoom', state.zoom);
+  updateHandleOverlay();
+}
+
+function setElBounds(el, obj) {
+  el.style.left   = obj.x + 'px';
+  el.style.top    = obj.y + 'px';
+  if (obj.type !== 'text') {
+    el.style.width  = obj.w + 'px';
+    el.style.height = obj.h + 'px';
+  }
+}
+
+function createElement(obj) {
+  const el = document.createElement('div');
+  el.className   = `obj ${obj.type}`;
+  el.dataset.id  = obj.id;
+  setElBounds(el, obj);
+  if (obj.type === 'image') {
+    const img = document.createElement('img');
+    img.src = obj.src;
+    img.draggable = false;
+    el.appendChild(img);
+  }
+  if (obj.type === 'rect') {
+    applyRectColor(el, obj.colorIndex);
+  }
+  if (obj.type === 'text') {
+    el.textContent    = obj.text;
+    el.style.color    = obj.color;
+    el.style.fontSize = (obj.fontSize || 20) + 'px';
+  }
+  world.appendChild(el);
+  return el;
+}
+
+function renderAll() {
+  world.querySelectorAll('.obj').forEach(e => e.remove());
+  state.objects.forEach(createElement);
+  world.appendChild(preview);
+  applyTransform();
+  updateHint();
+}
+
+function getEl(id) {
+  return world.querySelector(`.obj[data-id="${id}"]`);
+}
+
+function updateHint() {
+  hint.classList.toggle('hidden', state.objects.length > 0);
+}
+
+// ── Handle overlay ────────────────────────────
+// The overlay is fixed in screen space so handles are always 9 px regardless of zoom.
+
+function updateHandleOverlay() {
+  // Handles only shown for a single non-text selected object.
+  // Per-object selection boxes are drawn via CSS box-shadow on .obj.selected.
+  if (selectedIds.size !== 1 || state.tool !== 'select') {
+    handleOverlay.style.display = 'none';
+    return;
+  }
+  const [id] = selectedIds;
+  const obj = state.objects.find(o => o.id === id);
+  if (obj?.type === 'text') { handleOverlay.style.display = 'none'; return; }
+  const el = getEl(id);
+  if (!el) { handleOverlay.style.display = 'none'; return; }
+  const r = el.getBoundingClientRect();
+  handleOverlay.style.display = 'block';
+  handleOverlay.style.left    = r.left   + 'px';
+  handleOverlay.style.top     = r.top    + 'px';
+  handleOverlay.style.width   = r.width  + 'px';
+  handleOverlay.style.height  = r.height + 'px';
+  handleOverlay.querySelectorAll('.rh').forEach(h => h.style.display = '');
+}
+
+// ── Tool buttons ─────────────────────────────
+
+function setTool(tool) {
+  commitText();
+  state.tool = tool;
+  document.body.className = `tool-${tool}`;
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(`btn-${tool}`)?.classList.add('active');
+  clearSelection();
+  if (document.activeElement?.closest('#toolbar')) document.activeElement.blur();
+}
+
+document.getElementById('btn-select').addEventListener('click',    () => setTool('select'));
+document.getElementById('btn-text').addEventListener('click',      () => setTool('text'));
+document.getElementById('btn-highlight').addEventListener('click', () => setTool('highlight'));
+
+// ── Keyboard ─────────────────────────────────
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Shift') { shiftHeld = true; return; }
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+  if (e.key === 's' || e.key === 'S') { setTool('select');    return; }
+  if (e.key === 't' || e.key === 'T') { setTool('text');      return; }
+  if (e.key === 'h' || e.key === 'H') { setTool('highlight'); return; }
+  if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelected(); return; }
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
+    if (selectedIds.size === 0) return;
+    e.preventDefault();
+    if (!drag) pushUndo();
+    selectedIds.forEach(id => {
+      const obj = state.objects.find(o => o.id === id);
+      if (!obj) return;
+      if (e.key === 'ArrowUp')    obj.y -= 1;
+      if (e.key === 'ArrowDown')  obj.y += 1;
+      if (e.key === 'ArrowLeft')  obj.x -= 1;
+      if (e.key === 'ArrowRight') obj.x += 1;
+      const el = getEl(id);
+      if (el) { el.style.left = obj.x + 'px'; el.style.top = obj.y + 'px'; }
+    });
+    updateHandleOverlay();
+    save();
+    return;
+  }
+  if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+    e.preventDefault(); undo();
+  }
+});
+document.addEventListener('keyup', e => {
+  if (e.key === 'Shift') shiftHeld = false;
+});
+
+// ── Paste images ─────────────────────────────
+
+document.addEventListener('paste', e => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (!item.type.startsWith('image/')) continue;
+    const blob   = item.getAsFile();
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const src = ev.target.result;
+      const img = new Image();
+      img.onload = () => {
+        const vw = viewport.clientWidth;
+        const vh = viewport.clientHeight;
+        const cx = (vw / 2 - state.pan.x) / state.zoom;
+        const cy = (vh / 2 - state.pan.y) / state.zoom;
+        pushUndo();
+        const obj = {
+          id: state.nextId++, type: 'image',
+          x: cx - img.naturalWidth  / 2,
+          y: cy - img.naturalHeight / 2,
+          w: img.naturalWidth,
+          h: img.naturalHeight,
+          src,
+        };
+        state.objects.push(obj);
+        imageBlobs.set(obj.id, blob);
+        createElement(obj);
+        world.appendChild(preview);
+        save();
+        updateHint();
+      };
+      img.src = src;
+    };
+    reader.readAsDataURL(blob);
+  }
+});
+
+// ── Selection ─────────────────────────────────
+
+function clearSelection() {
+  selectedIds.forEach(id => getEl(id)?.classList.remove('selected'));
+  selectedIds.clear();
+  updateHandleOverlay();
+}
+
+function selectObj(id) {
+  clearSelection();
+  selectedIds.add(id);
+  getEl(id)?.classList.add('selected');
+  updateHandleOverlay();
+}
+
+function addToSelection(id) {
+  selectedIds.add(id);
+  getEl(id)?.classList.add('selected');
+  updateHandleOverlay();
+}
+
+function deleteSelected() {
+  if (selectedIds.size === 0) return;
+  pushUndo();
+  selectedIds.forEach(id => {
+    getEl(id)?.remove();
+    state.objects = state.objects.filter(o => o.id !== id);
+    imageBlobs.delete(id);
+  });
+  clearSelection();
+  save();
+  updateHint();
+}
+
+// ── Coordinates ───────────────────────────────
+
+function toWorld(cx, cy) {
+  return {
+    x: (cx - state.pan.x) / state.zoom,
+    y: (cy - state.pan.y) / state.zoom,
+  };
+}
+
+// ── Text tool ─────────────────────────────────
+
+const textInput  = document.getElementById('text-input');
+let   textPos       = null;
+let   textActive    = false;
+let   suppressBlur  = false;
+let   textFontSize  = 20;   // world-space px, adjustable with scroll while editing
+let   editingId     = null; // id of the text object being edited (null = new)
+
+function sampleLuminance(wx, wy, ww, wh) {
+  const W = Math.max(1, Math.round(ww)), H = Math.max(1, Math.round(wh));
+  const oc = document.createElement('canvas');
+  oc.width = W; oc.height = H;
+  const ctx = oc.getContext('2d');
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  for (const obj of state.objects) {
+    if (obj.type !== 'image') continue;
+    if (obj.x + obj.w <= wx || obj.x >= wx + ww ||
+        obj.y + obj.h <= wy || obj.y >= wy + wh) continue;
+    const imgEl = getEl(obj.id)?.querySelector('img');
+    if (!imgEl?.complete) continue;
+    const sx = Math.max(0, wx - obj.x), sy = Math.max(0, wy - obj.y);
+    const sw = Math.min(obj.w - sx, ww - Math.max(0, obj.x - wx));
+    const sh = Math.min(obj.h - sy, wh - Math.max(0, obj.y - wy));
+    const dx = Math.max(0, obj.x - wx), dy = Math.max(0, obj.y - wy);
+    if (sw > 0 && sh > 0) try { ctx.drawImage(imgEl, sx, sy, sw, sh, dx, dy, sw, sh); } catch(_) {}
+  }
+  const data = ctx.getImageData(0, 0, W, H).data;
+  let lum = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const toL = v => { const c = v/255; return c <= 0.04045 ? c/12.92 : ((c+0.055)/1.055)**2.4; };
+    lum += 0.2126*toL(data[i]) + 0.7152*toL(data[i+1]) + 0.0722*toL(data[i+2]);
+  }
+  lum /= (data.length / 4);
+  return (1.05/(lum+0.05)) >= ((lum+0.05)/0.05) ? '#ffffff' : '#000000';
+}
+
+// Restore the DOM element that was hidden during editing
+function restoreEditedEl() {
+  if (editingId !== null) {
+    const el = getEl(editingId);
+    if (el) el.style.opacity = '';
+  }
+}
+
+function commitText() {
+  if (!textActive) return;
+  textActive = false;
+  const text      = textInput.innerText;
+  const w         = Math.max(10, textInput.offsetWidth);
+  const h         = Math.max(10, textInput.offsetHeight);
+  const savedPos  = textPos;
+  const savedId   = editingId;
+  const savedSize = textFontSize;
+  textInput.style.display = 'none';
+  textInput.innerHTML     = '';
+  textPos   = null;
+  editingId = null;
+
+  if (!text.trim() || !savedPos) { restoreEditedEl(); return; }
+
+  const color = sampleLuminance(savedPos.x, savedPos.y, w, h);
+  pushUndo();
+
+  if (savedId !== null) {
+    // Update existing text object
+    const obj = state.objects.find(o => o.id === savedId);
+    if (obj) {
+      obj.text = text.trimEnd(); obj.color = color;
+      obj.fontSize = savedSize;  obj.w = w; obj.h = h;
+      const el = getEl(savedId);
+      if (el) {
+        el.textContent    = obj.text;
+        el.style.color    = obj.color;
+        el.style.fontSize = obj.fontSize + 'px';
+        el.style.opacity  = '';
+      }
+    }
+  } else {
+    // Create new text object
+    const obj = {
+      id: state.nextId++, type: 'text',
+      x: savedPos.x, y: savedPos.y, w, h,
+      text: text.trimEnd(), color, fontSize: savedSize,
+    };
+    state.objects.push(obj);
+    createElement(obj);
+    world.appendChild(preview);
+  }
+  save();
+  updateHint();
+}
+
+// Shared setup for both new text and editing existing
+function activateInput(x, y, fontSize, color, initialText) {
+  world.appendChild(textInput); // keep on top of all .obj elements
+  textInput.style.left     = x + 'px';
+  textInput.style.top      = y + 'px';
+  textInput.style.fontSize = fontSize + 'px';
+  textInput.style.color    = color;
+  textInput.style.display  = 'block';
+  if (initialText != null) {
+    textInput.innerText = initialText;
+    // Move caret to end
+    const r = document.createRange();
+    r.selectNodeContents(textInput);
+    r.collapse(false);
+    const s = window.getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
+  } else {
+    textInput.innerHTML = '';
+  }
+  textInput.focus();
+}
+
+function openTextAt(wc) {
+  suppressBlur = true;
+  if (textActive) commitText();
+  textActive    = true;
+  editingId     = null;
+  textPos       = { x: wc.x, y: wc.y };
+  // Sample background immediately so color is correct while typing
+  const color   = sampleLuminance(wc.x, wc.y, 300, textFontSize * 1.5);
+  activateInput(wc.x, wc.y, textFontSize, color, null);
+  suppressBlur = false;
+}
+
+function openEditAt(obj) {
+  suppressBlur = true;
+  if (textActive) commitText();
+  textActive   = true;
+  editingId    = obj.id;
+  textFontSize = obj.fontSize || 20;
+  textPos      = { x: obj.x, y: obj.y };
+  // Hide original while editing to avoid visual duplication
+  const el = getEl(obj.id);
+  if (el) el.style.opacity = '0';
+  activateInput(obj.x, obj.y, textFontSize, obj.color, obj.text);
+  suppressBlur = false;
+}
+
+textInput.addEventListener('blur', () => { if (!suppressBlur) commitText(); });
+textInput.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    textActive = false;
+    textInput.style.display = 'none';
+    textInput.innerHTML     = '';
+    textPos   = null;
+    restoreEditedEl();
+    editingId = null;
+  }
+  e.stopPropagation();
+});
+
+// ── Double-click to edit text ─────────────────
+
+viewport.addEventListener('dblclick', e => {
+  e.preventDefault();
+  drag = null; // cancel any drag setup from the preceding single clicks
+  const objEl = e.target.closest('.obj.text');
+  if (objEl) {
+    const obj = state.objects.find(o => o.id === parseInt(objEl.dataset.id));
+    if (!obj) return;
+    setTool('text');
+    openEditAt(obj);
+  } else {
+    setTool('text');
+    openTextAt(toWorld(e.clientX, e.clientY));
+  }
+});
+
+// ── Resize: handle mousedown ──────────────────
+// The overlay has pointer-events:none; individual handles have pointer-events:all.
+
+handleOverlay.addEventListener('mousedown', e => {
+  const h = e.target.closest('.rh');
+  if (!h || selectedIds.size !== 1) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const [selId] = selectedIds;
+  const obj = state.objects.find(o => o.id === selId);
+  if (!obj || obj.type === 'text') return; // text size is content-driven
+  const wc = toWorld(e.clientX, e.clientY);
+  pushUndo();
+  drag = {
+    type: 'resize',
+    id:   selId,
+    dir:  h.dataset.dir,
+    ox: obj.x, oy: obj.y, ow: obj.w, oh: obj.h,
+    ar: obj.w / obj.h,
+    wx: wc.x,  wy: wc.y,
+  };
+});
+
+// ── Viewport mousedown ────────────────────────
+
+viewport.addEventListener('mousedown', e => {
+  if (e.button === 1) { e.preventDefault(); startPan(e); return; }
+  if (e.button !== 0) return;
+
+  const objEl = e.target.closest('.obj');
+
+  // Text tool: single click commits any active text and returns to select
+  if (state.tool === 'text') {
+    e.preventDefault();
+    commitText();
+    setTool('select');
+    // fall through to select logic below
+  }
+
+  if (state.tool === 'select') {
+    // Shift+mousedown: defer decision — becomes shift-click or rubber-band in mousemove/mouseup
+    if (shiftHeld) {
+      e.preventDefault();
+      const wc = toWorld(e.clientX, e.clientY);
+      drag = {
+        type: 'shiftPending',
+        sx: wc.x, sy: wc.y,
+        screenX: e.clientX, screenY: e.clientY,
+        clickedId: objEl ? parseInt(objEl.dataset.id) : null,
+      };
+      return;
+    }
+
+    if (objEl) {
+      e.preventDefault();
+      const id = parseInt(objEl.dataset.id);
+      if (!selectedIds.has(id)) selectObj(id); // plain click on unselected: replace selection
+      // Start drag carrying all currently selected objects
+      const wc = toWorld(e.clientX, e.clientY);
+      pushUndo();
+      drag = {
+        type: 'dragObj',
+        ids: [...selectedIds],
+        origins: Object.fromEntries([...selectedIds].map(sid => {
+          const so = state.objects.find(o => o.id === sid);
+          return [sid, { x: so.x, y: so.y }];
+        })),
+        wx: wc.x, wy: wc.y,
+      };
+    } else {
+      // Click in empty space — check if inside the selection bounding box
+      if (selectedIds.size > 0) {
+        const or = handleOverlay.getBoundingClientRect();
+        if (e.clientX >= or.left && e.clientX <= or.right &&
+            e.clientY >= or.top  && e.clientY <= or.bottom) {
+          e.preventDefault();
+          const wc = toWorld(e.clientX, e.clientY);
+          pushUndo();
+          drag = {
+            type: 'dragObj',
+            ids: [...selectedIds],
+            origins: Object.fromEntries([...selectedIds].map(sid => {
+              const so = state.objects.find(o => o.id === sid);
+              return [sid, { x: so.x, y: so.y }];
+            })),
+            wx: wc.x, wy: wc.y,
+          };
+          return;
+        }
+      }
+      clearSelection();
+      startPan(e);
+    }
+    return;
+  }
+
+  if (state.tool === 'highlight') {
+    e.preventDefault();
+    const wc = toWorld(e.clientX, e.clientY);
+    drag = { type: 'drawRect', sx: wc.x, sy: wc.y, clickedEl: e.target.closest('.obj') };
+    preview.style.cssText = `display:block; left:${wc.x}px; top:${wc.y}px; width:0; height:0;`;
+  }
+});
+
+function startPan(e) {
+  drag = { type: 'pan', sx: e.clientX - state.pan.x, sy: e.clientY - state.pan.y };
+  document.body.classList.add('panning');
+}
+
+// ── Mousemove ─────────────────────────────────
+
+document.addEventListener('mousemove', e => {
+  if (!drag) return;
+
+  if (drag.type === 'pan') {
+    state.pan.x = e.clientX - drag.sx;
+    state.pan.y = e.clientY - drag.sy;
+    applyTransform();
+    return;
+  }
+
+  if (drag.type === 'dragObj') {
+    const wc = toWorld(e.clientX, e.clientY);
+    const dx = wc.x - drag.wx, dy = wc.y - drag.wy;
+    for (const id of drag.ids) {
+      const obj = state.objects.find(o => o.id === id);
+      if (!obj) continue;
+      obj.x = drag.origins[id].x + dx;
+      obj.y = drag.origins[id].y + dy;
+      const el = getEl(id);
+      if (el) { el.style.left = obj.x + 'px'; el.style.top = obj.y + 'px'; }
+    }
+    updateHandleOverlay();
+    return;
+  }
+
+  if (drag.type === 'shiftPending') {
+    // Upgrade to rubber-band once the pointer moves more than 6 px
+    if (Math.hypot(e.clientX - drag.screenX, e.clientY - drag.screenY) > 6) {
+      drag.type = 'rubberBand';
+      preview.style.cssText = `display:block; left:${drag.sx}px; top:${drag.sy}px; width:0; height:0; border-color:rgba(10,132,255,0.65); background:rgba(10,132,255,0.05);`;
+    }
+    return;
+  }
+
+  if (drag.type === 'rubberBand') {
+    const wc = toWorld(e.clientX, e.clientY);
+    const x = Math.min(wc.x, drag.sx), y = Math.min(wc.y, drag.sy);
+    const w = Math.abs(wc.x - drag.sx), h = Math.abs(wc.y - drag.sy);
+    preview.style.left = x + 'px'; preview.style.top    = y + 'px';
+    preview.style.width = w + 'px'; preview.style.height = h + 'px';
+    // Solid = contained mode (right drag), dashed = intersect mode (left drag)
+    preview.style.borderStyle = wc.x >= drag.sx ? 'solid' : 'dashed';
+    return;
+  }
+
+  if (drag.type === 'resize') {
+    const wc  = toWorld(e.clientX, e.clientY);
+    const ddx = wc.x - drag.wx;
+    const ddy = wc.y - drag.wy;
+    const dir = drag.dir;
+
+    // Compute unconstrained new bounds
+    let nx = drag.ox, ny = drag.oy, nw = drag.ow, nh = drag.oh;
+    if (dir.includes('e')) nw = drag.ow + ddx;
+    if (dir.includes('s')) nh = drag.oh + ddy;
+    if (dir.includes('w')) { nx = drag.ox + ddx; nw = drag.ow - ddx; }
+    if (dir.includes('n')) { ny = drag.oy + ddy; nh = drag.oh - ddy; }
+
+    // Aspect-ratio lock (Shift)
+    if (shiftHeld) {
+      const isCorner = dir.length === 2; // 'nw','ne','sw','se'
+      if (isCorner) {
+        // Pick whichever axis moved proportionally more
+        const sW = nw / drag.ow;
+        const sH = nh / drag.oh;
+        const s  = Math.abs(sW) >= Math.abs(sH) ? sW : sH;
+        const cw = drag.ow * s;
+        const ch = drag.oh * s;
+        if (dir.includes('w')) nx = drag.ox + drag.ow - cw; else nx = drag.ox;
+        if (dir.includes('n')) ny = drag.oy + drag.oh - ch; else ny = drag.oy;
+        nw = cw; nh = ch;
+      } else if (dir === 'e' || dir === 'w') {
+        // Width drives; expand/contract height from centre
+        const ch = nw / drag.ar;
+        ny = drag.oy - (ch - drag.oh) / 2;
+        nh = ch;
+      } else {
+        // Height drives; expand/contract width from centre
+        const cw = nh * drag.ar;
+        nx = drag.ox - (cw - drag.ow) / 2;
+        nw = cw;
+      }
+    }
+
+    // Minimum size — prevent collapsing to zero
+    const MIN = 10;
+    if (nw < MIN) { if (dir.includes('w')) nx = drag.ox + drag.ow - MIN; nw = MIN; }
+    if (nh < MIN) { if (dir.includes('n')) ny = drag.oy + drag.oh - MIN; nh = MIN; }
+
+    const obj = state.objects.find(o => o.id === drag.id);
+    if (!obj) return;
+    obj.x = nx; obj.y = ny; obj.w = nw; obj.h = nh;
+    const el = getEl(drag.id);
+    if (el) setElBounds(el, obj);
+    updateHandleOverlay();
+    return;
+  }
+
+  if (drag.type === 'drawRect') {
+    const wc = toWorld(e.clientX, e.clientY);
+    const x  = Math.min(wc.x, drag.sx), y = Math.min(wc.y, drag.sy);
+    const w  = Math.abs(wc.x - drag.sx), h = Math.abs(wc.y - drag.sy);
+    preview.style.left   = x + 'px'; preview.style.top    = y + 'px';
+    preview.style.width  = w + 'px'; preview.style.height = h + 'px';
+  }
+});
+
+// ── Mouseup ───────────────────────────────────
+
+document.addEventListener('mouseup', e => {
+  if (!drag) return;
+  const d = drag;
+  drag = null;
+  document.body.classList.remove('panning');
+
+  if (d.type === 'pan' || d.type === 'resize') {
+    save();
+    return;
+  }
+
+  if (d.type === 'dragObj') {
+    for (const id of d.ids) {
+      const obj = state.objects.find(o => o.id === id);
+      if (obj?.type === 'text') {
+        const el = getEl(id);
+        const w = el ? el.offsetWidth  : 200;
+        const h = el ? el.offsetHeight : (obj.fontSize ?? 20) * 1.5;
+        obj.color = sampleLuminance(obj.x, obj.y, w, h);
+        if (el) el.style.color = obj.color;
+      }
+    }
+    save();
+    return;
+  }
+
+  if (d.type === 'shiftPending') {
+    // Released before reaching drag threshold → pure shift-click
+    if (d.clickedId !== null) addToSelection(d.clickedId);
+    return;
+  }
+
+  if (d.type === 'rubberBand') {
+    preview.style.display = 'none';
+    const wc = toWorld(e.clientX, e.clientY);
+    const rx = Math.min(wc.x, d.sx), ry = Math.min(wc.y, d.sy);
+    const rw = Math.abs(wc.x - d.sx), rh = Math.abs(wc.y - d.sy);
+    {
+      // Drag direction determines mode (industry standard: Figma / SketchUp / AutoCAD)
+      //   Right drag (endX > startX) → contained: object must be fully inside the box
+      //   Left drag  (endX < startX) → intersecting: any overlap selects
+      const contained = (wc.x > d.sx);
+      for (const obj of state.objects) {
+        const ow = obj.w ?? getEl(obj.id)?.offsetWidth  ?? 0;
+        const oh = obj.h ?? getEl(obj.id)?.offsetHeight ?? 0;
+        if (ow === 0 || oh === 0) continue;
+        let hit;
+        if (contained) {
+          hit = obj.x >= rx && obj.y >= ry &&
+                obj.x + ow <= rx + rw && obj.y + oh <= ry + rh;
+        } else {
+          const ix2 = Math.min(rx + rw, obj.x + ow), iy2 = Math.min(ry + rh, obj.y + oh);
+          hit = ix2 > Math.max(rx, obj.x) && iy2 > Math.max(ry, obj.y);
+        }
+        if (hit) addToSelection(obj.id);
+      }
+    }
+    return;
+  }
+
+  if (d.type === 'drawRect') {
+    preview.style.display = 'none';
+    const wc = toWorld(e.clientX, e.clientY);
+    const x  = Math.min(wc.x, d.sx), y = Math.min(wc.y, d.sy);
+    const w  = Math.abs(wc.x - d.sx), h = Math.abs(wc.y - d.sy);
+    if (w < 6 || h < 6) {
+      preview.style.display = 'none';
+      setTool('select');
+      if (d.clickedEl) selectObj(parseInt(d.clickedEl.dataset.id));
+      return;
+    }
+    pushUndo();
+    const obj = { id: state.nextId++, type: 'rect', x, y, w, h };
+    state.objects.push(obj);
+    createElement(obj);
+    world.appendChild(preview);
+    save();
+    updateHint();
+  }
+});
+
+// ── Zoom ─────────────────────────────────────
+
+viewport.addEventListener('wheel', e => {
+  e.preventDefault();
+  if (textActive) {
+    // Scroll resizes text font; does not zoom canvas
+    textFontSize = Math.max(6, Math.min(400, textFontSize + (e.deltaY < 0 ? 2 : -2)));
+    textInput.style.fontSize = textFontSize + 'px';
+    return;
+  }
+  if (selectedIds.size === 1) {
+    const [selId] = selectedIds;
+    const obj = state.objects.find(o => o.id === selId);
+    if (obj?.type === 'rect') {
+      pushUndo();
+      const dir = e.deltaY < 0 ? 1 : -1;
+      obj.colorIndex = ((obj.colorIndex ?? 0) + dir + RECT_COLORS.length) % RECT_COLORS.length;
+      applyRectColor(getEl(obj.id), obj.colorIndex);
+      save();
+      return;
+    }
+  }
+  const factor  = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  const newZoom = Math.max(0.05, Math.min(20, state.zoom * factor));
+  const r  = viewport.getBoundingClientRect();
+  const cx = e.clientX - r.left;
+  const cy = e.clientY - r.top;
+  state.pan.x = cx - (cx - state.pan.x) * (newZoom / state.zoom);
+  state.pan.y = cy - (cy - state.pan.y) * (newZoom / state.zoom);
+  state.zoom  = newZoom;
+  applyTransform();
+  save();
+}, { passive: false });
+
+viewport.addEventListener('contextmenu', e => e.preventDefault());
+
+// ── Export / Import / Wipe ────────────────────
+
+async function exportCanvas() {
+  const objects = await Promise.all(state.objects.map(async obj => {
+    if (obj.type !== 'image') return { ...obj };
+    let src = obj.src;
+    if (!src) {
+      const blob = imageBlobs.get(obj.id);
+      if (blob) src = await blobToDataURL(blob);
+    }
+    return { ...obj, src };
+  }));
+  const data = JSON.stringify({
+    _type: 'canvas-board-export', _version: 1,
+    objects, pan: state.pan, zoom: state.zoom, nextId: state.nextId,
+  });
+  const blob = new Blob([data], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'canvas-board-export.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function importCanvas(file) {
+  let data;
+  try { data = JSON.parse(await file.text()); } catch (_) {
+    alert('Invalid file: could not parse JSON.');
+    return;
+  }
+  if (data._type !== 'canvas-board-export') {
+    alert('Invalid file: this does not appear to be a Canvas Board export.');
+    return;
+  }
+  if (!confirm('Import will replace the current canvas. Continue?')) return;
+
+  await idbClear('images');
+  imageBlobs.clear();
+  state.objects = data.objects || [];
+  state.pan     = data.pan    || { x: 0, y: 0 };
+  state.zoom    = data.zoom   || 1;
+  state.nextId  = data.nextId || 1;
+  for (const obj of state.objects) {
+    if (obj.type === 'image' && obj.src) imageBlobs.set(obj.id, dataURLtoBlob(obj.src));
+  }
+  clearSelection();
+  await doSave();
+  renderAll();
+}
+
+async function wipeCanvas() {
+  if (!state.objects.length) return;
+  if (!confirm('Wipe the entire canvas?')) return;
+  state.objects = [];
+  state.nextId  = 1;
+  imageBlobs.clear();
+  clearSelection();
+  await idbClear('images');
+  save();
+  renderAll();
+}
+
+// ── File menu ─────────────────────────────────
+
+const fileMenuBtn    = document.getElementById('file-menu-btn');
+const fileMenuPanel  = document.getElementById('file-menu-panel');
+const fileImportInput = document.getElementById('file-import-input');
+
+fileMenuBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  fileMenuPanel.classList.toggle('open');
+});
+document.addEventListener('click', () => fileMenuPanel.classList.remove('open'));
+fileMenuPanel.addEventListener('click', e => e.stopPropagation());
+
+document.getElementById('file-export-btn').addEventListener('click', () => {
+  fileMenuPanel.classList.remove('open');
+  exportCanvas();
+});
+document.getElementById('file-import-btn').addEventListener('click', () => {
+  fileMenuPanel.classList.remove('open');
+  fileImportInput.click();
+});
+fileImportInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) importCanvas(file);
+  e.target.value = '';
+});
+document.getElementById('file-wipe-btn').addEventListener('click', () => {
+  fileMenuPanel.classList.remove('open');
+  wipeCanvas();
+});
+
+// ── Init ─────────────────────────────────────
+
+async function init() {
+  db = await openDB().catch(() => null);
+  await load();
+  renderAll();
+}
+init();
+</script>
+</body>
+</html>

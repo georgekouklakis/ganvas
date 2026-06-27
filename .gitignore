@@ -1,0 +1,37 @@
+# Claude Code runtime (memory, session state)
+.claude/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# Editors — VS Code
+.vscode/
+
+# Editors — JetBrains (WebStorm, etc.)
+.idea/
+*.iml
+
+# Editors — Vim/Neovim
+*.swp
+*.swo
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+
+# Editors — Emacs
+\#*\#
+.\#*
+
+# Temporary / scratch files
+*.log
+*.tmp
+*.bak

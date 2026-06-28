@@ -328,14 +328,22 @@ body.tool-select .obj.selected { cursor: move; }
   </button>
   <div id="file-menu-panel">
     <button class="file-menu-item" id="file-import-btn">
-      <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor">
-        <path d="M7 1v8M4 6l3 3 3-3M1 10v2.5A.5.5 0 001.5 13h11a.5.5 0 00.5-.5V10"/>
+      <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <!-- open-top box: left wall, bottom, right wall -->
+        <polyline points="1,6 1,13 13,13 13,6"/>
+        <!-- arrow entering box from above -->
+        <line x1="7" y1="1" x2="7" y2="9"/>
+        <polyline points="4,6 7,9 10,6"/>
       </svg>
       Import
     </button>
     <button class="file-menu-item" id="file-export-btn">
-      <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor">
-        <path d="M7 9V1M4 4l3-3 3 3M1 10v2.5a.5.5 0 00.5.5h11a.5.5 0 00.5-.5V10"/>
+      <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <!-- open-top box: left wall, bottom, right wall -->
+        <polyline points="1,6 1,13 13,13 13,6"/>
+        <!-- arrow exiting box upward -->
+        <line x1="7" y1="9" x2="7" y2="1"/>
+        <polyline points="4,4 7,1 10,4"/>
       </svg>
       Export
     </button>

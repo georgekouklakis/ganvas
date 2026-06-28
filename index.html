@@ -370,7 +370,7 @@ body.tool-select .obj.selected { cursor: move; }
 
 <div id="hint">
   Paste an image to add it &nbsp;·&nbsp; Scroll to zoom &nbsp;·&nbsp; Drag background to pan<br>
-  Delete removes selected &nbsp;·&nbsp; Shift + drag corner/edge = lock aspect ratio
+  Delete removes selected &nbsp;·&nbsp; Shift + drag corner/edge = lock aspect ratio &nbsp;·&nbsp; Shift + ↑↓ = layer order
 </div>
 
 <script>
@@ -669,6 +669,24 @@ document.addEventListener('keydown', e => {
   if (e.key === 't' || e.key === 'T') { setTool('text');      return; }
   if (e.key === 'h' || e.key === 'H') { setTool('highlight'); return; }
   if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelected(); return; }
+  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && shiftHeld) {
+    if (selectedIds.size !== 1) return;
+    e.preventDefault();
+    const id = [...selectedIds][0];
+    const idx = state.objects.findIndex(o => o.id === id);
+    if (idx === -1) return;
+    pushUndo();
+    if (e.key === 'ArrowUp' && idx < state.objects.length - 1) {
+      [state.objects[idx], state.objects[idx + 1]] = [state.objects[idx + 1], state.objects[idx]];
+    } else if (e.key === 'ArrowDown' && idx > 0) {
+      [state.objects[idx], state.objects[idx - 1]] = [state.objects[idx - 1], state.objects[idx]];
+    }
+    renderAll();
+    getEl(id)?.classList.add('selected');
+    updateHandleOverlay();
+    save();
+    return;
+  }
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
     if (selectedIds.size === 0) return;
     e.preventDefault();

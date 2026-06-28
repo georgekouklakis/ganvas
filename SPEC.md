@@ -84,6 +84,7 @@ A separate **file menu button** (frosted glass, 36 × 36 px, top-left at `top: 2
   - A shift+mousedown that never reaches 6 px of movement is treated as a plain shift-click on whatever was under the cursor.
 - **Delete** or **Backspace** → removes **all** selected objects.
 - **Arrow keys** → nudges **all** selected objects by 1 px in the pressed direction.
+- **Shift + ↑ / ↓** → moves the single selected object one layer up or down in the render stack. Only works when exactly one object is selected. This is undoable.
 
 #### Selection visual
 
@@ -184,7 +185,7 @@ Text color is determined at placement time and recalculated whenever a text obje
 
 - `Ctrl+Z` / `Cmd+Z` undoes the last mutating action.
 - Undo stack depth: 40 levels.
-- Undoable actions: paste image, create highlight rect, change highlight color, create text, edit text, delete object(s), move object(s), resize object, nudge object(s) with arrow keys.
+- Undoable actions: paste image, create highlight rect, change highlight color, create text, edit text, delete object(s), move object(s), resize object, nudge object(s) with arrow keys, layer reorder (Shift+↑/↓).
 - Undo restores the object list only (pan and zoom are not undoable).
 - After undo, the selection is cleared.
 
@@ -199,6 +200,7 @@ Text color is determined at placement time and recalculated whenever a text obje
 | `H` | Switch to Highlight tool | Not editing text |
 | `Delete` / `Backspace` | Delete all selected objects | Not editing text |
 | `Arrow keys` | Nudge all selected objects 1 px | Not editing text |
+| `Shift + ↑` / `Shift + ↓` | Move selected object one layer up / down | Exactly one object selected, not editing text |
 | `Ctrl/Cmd + Z` | Undo | Not editing text |
 | `Shift` (held) | Add to selection on click; lock aspect ratio on resize handle drag | — |
 | `Escape` | Discard text input | While editing text |

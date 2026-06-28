@@ -981,12 +981,22 @@ viewport.addEventListener('mousedown', e => {
 
   const objEl = e.target.closest('.obj');
 
-  // Text tool: single click commits any active text and returns to select
+  // Text tool: click on empty space opens new text; click on text obj opens edit;
+  // click on a non-text obj commits and falls through to select logic.
   if (state.tool === 'text') {
     e.preventDefault();
+    if (!objEl) {
+      openTextAt(toWorld(e.clientX, e.clientY));
+      return;
+    }
+    const obj = state.objects.find(o => o.id === parseInt(objEl.dataset.id));
+    if (obj?.type === 'text') {
+      openEditAt(obj);
+      return;
+    }
+    // Clicked a non-text object — commit and fall through to select
     commitText();
     setTool('select');
-    // fall through to select logic below
   }
 
   if (state.tool === 'select') {
